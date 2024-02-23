@@ -20,6 +20,7 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	apierr "k8s.io/apimachinery/pkg/api/errors"
@@ -939,7 +940,7 @@ func (r *ApplicationSetReconciler) performProgressiveSyncs(ctx context.Context, 
 		return nil, fmt.Errorf("failed to build app dependency list: %w", err)
 	}
 
-	_, err = r.updateApplicationSetApplicationStatus(ctx, logCtx, &appset, applications, appStepMap)
+	_, err = r.updateApplicationSetApplicationStatus(ctx, logCtx, &appset, applications, appStepMap, uuid.NewString)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update applicationset app status: %w", err)
 	}
@@ -1129,7 +1130,7 @@ func statusStrings(app argov1alpha1.Application) (string, string, string) {
 }
 
 // check the status of each Application's status and promote Applications to the next status if needed
-func (r *ApplicationSetReconciler) updateApplicationSetApplicationStatus(ctx context.Context, logCtx *log.Entry, applicationSet *argov1alpha1.ApplicationSet, applications []argov1alpha1.Application, appStepMap map[string]int) ([]argov1alpha1.ApplicationSetApplicationStatus, error) {
+func (r *ApplicationSetReconciler) updateApplicationSetApplicationStatus(ctx context.Context, logCtx *log.Entry, applicationSet *argov1alpha1.ApplicationSet, applications []argov1alpha1.Application, appStepMap map[string]int, generateId func() string) ([]argov1alpha1.ApplicationSetApplicationStatus, error) {
 
 	now := metav1.Now()
 	appStatuses := make([]argov1alpha1.ApplicationSetApplicationStatus, 0, len(applications))
@@ -1150,6 +1151,7 @@ func (r *ApplicationSetReconciler) updateApplicationSetApplicationStatus(ctx con
 				Message:            "No Application status found, defaulting status to Waiting.",
 				Status:             "Waiting",
 				Step:               fmt.Sprint(appStepMap[app.Name] + 1),
+				Id:                 generateId(),
 			}
 		} else {
 			// we have an existing AppStatus
@@ -1167,20 +1169,39 @@ func (r *ApplicationSetReconciler) updateApplicationSetApplicationStatus(ctx con
 			currentAppStatus.Status = "Waiting"
 			currentAppStatus.Message = "Application has pending changes, setting status to Waiting."
 			currentAppStatus.Step = fmt.Sprint(appStepMap[currentAppStatus.Application] + 1)
+			currentAppStatus.Id = generateId()
 		}
 
 		if currentAppStatus.Status == "Pending" {
 			// check for successful syncs started less than 10s before the Application transitioned to Pending
 			// this covers race conditions where syncs initiated by RollingSync miraculously have a sync time before the transition to Pending state occurred (could be a few seconds)
-			if operationPhaseString == "Succeeded" && app.Status.OperationState.StartedAt.Add(time.Duration(10)*time.Second).After(currentAppStatus.LastTransitionTime.Time) {
-				if !app.Status.OperationState.StartedAt.After(currentAppStatus.LastTransitionTime.Time) {
-					logCtx.Warnf("Application %v was synced less than 10s prior to entering Pending status, we'll assume the AppSet controller triggered this sync and update its status to Progressing", app.Name)
+			if operationPhaseString == "Succeeded" {
+				var id string
+				for _, info := range app.Status.OperationState.Operation.Info {
+					if info.Name == "Id" {
+						id = info.Value
+					}
 				}
-				logCtx.Infof("Application %v has completed a sync successfully, updating its ApplicationSet status to Progressing", app.Name)
-				currentAppStatus.LastTransitionTime = &now
-				currentAppStatus.Status = "Progressing"
-				currentAppStatus.Message = "Application resource completed a sync successfully, updating status from Pending to Progressing."
-				currentAppStatus.Step = fmt.Sprint(appStepMap[currentAppStatus.Application] + 1)
+
+				promoteToProcessing := false
+				if app.Status.OperationState.Operation.InitiatedBy.Username == "applicationset-controller" {
+					if id == currentAppStatus.Id {
+						promoteToProcessing = true
+					} else {
+						logCtx.Warnf("Application %v has complated a sync successfully, but id %v does not match expected value %v", app.Name, id, "")
+					}
+				} else if app.Status.OperationState.Operation.InitiatedBy.Username != "applicationset-controller" && app.Status.OperationState.StartedAt.After(currentAppStatus.LastTransitionTime.Time) {
+					logCtx.Infof("Application %v has complated a sync successfully but was not iniated by applicationset-controller", app.Name)
+					promoteToProcessing = true
+				}
+
+				if promoteToProcessing {
+					logCtx.Infof("Application %v has completed a sync successfully, updating its ApplicationSet status to Progressing", app.Name)
+					currentAppStatus.LastTransitionTime = &now
+					currentAppStatus.Status = "Progressing"
+					currentAppStatus.Message = "Application resource completed a sync successfully, updating status from Pending to Progressing."
+					currentAppStatus.Step = fmt.Sprint(appStepMap[currentAppStatus.Application] + 1)
+				}
 			} else if operationPhaseString == "Running" || healthStatusString == "Progressing" {
 				logCtx.Infof("Application %v has entered Progressing status, updating its ApplicationSet status to Progressing", app.Name)
 				currentAppStatus.LastTransitionTime = &now
@@ -1196,6 +1217,7 @@ func (r *ApplicationSetReconciler) updateApplicationSetApplicationStatus(ctx con
 			currentAppStatus.Status = healthStatusString
 			currentAppStatus.Message = "Application resource is already Healthy, updating status from Waiting to Healthy."
 			currentAppStatus.Step = fmt.Sprint(appStepMap[currentAppStatus.Application] + 1)
+			currentAppStatus.Id = ""
 		}
 
 		if currentAppStatus.Status == "Progressing" && isApplicationHealthy(app) {
@@ -1204,6 +1226,7 @@ func (r *ApplicationSetReconciler) updateApplicationSetApplicationStatus(ctx con
 			currentAppStatus.Status = healthStatusString
 			currentAppStatus.Message = "Application resource became Healthy, updating status from Progressing to Healthy."
 			currentAppStatus.Step = fmt.Sprint(appStepMap[currentAppStatus.Application] + 1)
+			currentAppStatus.Id = ""
 		}
 
 		appStatuses = append(appStatuses, currentAppStatus)
@@ -1421,7 +1444,7 @@ func (r *ApplicationSetReconciler) syncValidApplications(logCtx *log.Entry, appl
 		// check appSyncMap to determine which Applications are ready to be updated and which should be skipped
 		if appSyncMap[validApps[i].Name] && appMap[validApps[i].Name].Status.Sync.Status == "OutOfSync" && appSetStatusPending {
 			logCtx.Infof("triggering sync for application: %v, prune enabled: %v", validApps[i].Name, pruneEnabled)
-			validApps[i], _ = syncApplication(validApps[i], pruneEnabled)
+			validApps[i], _ = syncApplication(validApps[i], pruneEnabled, applicationSet.Status.ApplicationStatus[idx].Id)
 		}
 		rolloutApps = append(rolloutApps, validApps[i])
 	}
@@ -1429,7 +1452,7 @@ func (r *ApplicationSetReconciler) syncValidApplications(logCtx *log.Entry, appl
 }
 
 // used by the RollingSync Progressive Sync strategy to trigger a sync of a particular Application resource
-func syncApplication(application argov1alpha1.Application, prune bool) (argov1alpha1.Application, error) {
+func syncApplication(application argov1alpha1.Application, prune bool, id string) (argov1alpha1.Application, error) {
 
 	operation := argov1alpha1.Operation{
 		InitiatedBy: argov1alpha1.OperationInitiator{
@@ -1440,6 +1463,10 @@ func syncApplication(application argov1alpha1.Application, prune bool) (argov1al
 			{
 				Name:  "Reason",
 				Value: "ApplicationSet RollingSync triggered a sync of this Application resource.",
+			},
+			{
+				Name:  "Id",
+				Value: id,
 			},
 		},
 		Sync: &argov1alpha1.SyncOperation{},
