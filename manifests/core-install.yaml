@@ -20149,6 +20149,8 @@ spec:
                   properties:
                     application:
                       type: string
+                    id:
+                      type: string
                     lastTransitionTime:
                       format: date-time
                       type: string
@@ -20160,6 +20162,7 @@ spec:
                       type: string
                   required:
                   - application
+                  - id
                   - message
                   - status
                   - step

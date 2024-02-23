@@ -196,6 +196,9 @@ message ApplicationSetApplicationStatus {
 
   // Step tracks which step this Application should be updated in
   optional string step = 5;
+
+  // UUID String representing the expected operation information to match a sync
+  optional string id = 6;
 }
 
 // ApplicationSetCondition contains details about an applicationset condition, which is usally an error or warning

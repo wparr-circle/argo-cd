@@ -852,8 +852,16 @@ func schema_pkg_apis_application_v1alpha1_ApplicationSetApplicationStatus(ref co
 							Format:      "",
 						},
 					},
+					"id": {
+						SchemaProps: spec.SchemaProps{
+							Description: "UUID String representing the expected operation information to match a sync",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
 				},
-				Required: []string{"application", "message", "status", "step"},
+				Required: []string{"application", "message", "status", "step", "id"},
 			},
 		},
 		Dependencies: []string{

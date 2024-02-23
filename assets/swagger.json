@@ -5929,6 +5929,10 @@
           "type": "string",
           "title": "Application contains the name of the Application resource"
         },
+        "id": {
+          "type": "string",
+          "title": "UUID String representing the expected operation information to match a sync"
+        },
         "lastTransitionTime": {
           "$ref": "#/definitions/v1Time"
         },
