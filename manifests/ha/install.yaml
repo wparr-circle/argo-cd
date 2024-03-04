@@ -20149,8 +20149,6 @@ spec:
                   properties:
                     application:
                       type: string
-                    id:
-                      type: string
                     lastTransitionTime:
                       format: date-time
                       type: string
@@ -20160,12 +20158,16 @@ spec:
                       type: string
                     step:
                       type: string
+                    targetRevisions:
+                      items:
+                        type: string
+                      type: array
                   required:
                   - application
-                  - id
                   - message
                   - status
                   - step
+                  - targetRevisions
                   type: object
                 type: array
               conditions:

@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -4572,8 +4571,6 @@ func TestUpdateApplicationSetApplicationStatus(t *testing.T) {
 	err = v1alpha1.AddToScheme(scheme)
 	assert.Nil(t, err)
 
-	id := uuid.New().String()
-
 	for _, cc := range []struct {
 		name              string
 		appSet            v1alpha1.ApplicationSet
@@ -4632,10 +4629,11 @@ func TestUpdateApplicationSetApplicationStatus(t *testing.T) {
 			},
 			expectedAppStatus: []v1alpha1.ApplicationSetApplicationStatus{
 				{
-					Application: "app1",
-					Message:     "Application resource is already Healthy, updating status from Waiting to Healthy.",
-					Status:      "Healthy",
-					Step:        "1",
+					Application:     "app1",
+					Message:         "Application resource is already Healthy, updating status from Waiting to Healthy.",
+					Status:          "Healthy",
+					Step:            "1",
+					TargetRevisions: []string{},
 				},
 			},
 		},
@@ -4674,10 +4672,11 @@ func TestUpdateApplicationSetApplicationStatus(t *testing.T) {
 			},
 			expectedAppStatus: []v1alpha1.ApplicationSetApplicationStatus{
 				{
-					Application: "app1",
-					Message:     "Application resource is already Healthy, updating status from Waiting to Healthy.",
-					Status:      "Healthy",
-					Step:        "1",
+					Application:     "app1",
+					Message:         "Application resource is already Healthy, updating status from Waiting to Healthy.",
+					Status:          "Healthy",
+					Step:            "1",
+					TargetRevisions: []string{},
 				},
 			},
 		},
@@ -4697,10 +4696,18 @@ func TestUpdateApplicationSetApplicationStatus(t *testing.T) {
 				Status: v1alpha1.ApplicationSetStatus{
 					ApplicationStatus: []v1alpha1.ApplicationSetApplicationStatus{
 						{
-							Application: "app1",
-							Message:     "",
-							Status:      "Healthy",
-							Step:        "1",
+							Application:     "app1",
+							Message:         "",
+							Status:          "Healthy",
+							Step:            "1",
+							TargetRevisions: []string{"Previous"},
+						},
+						{
+							Application:     "app2-multisource",
+							Message:         "",
+							Status:          "Healthy",
+							Step:            "1",
+							TargetRevisions: []string{"Previous", "OtherPrevious"},
 						},
 					},
 				},
@@ -4712,18 +4719,37 @@ func TestUpdateApplicationSetApplicationStatus(t *testing.T) {
 					},
 					Status: v1alpha1.ApplicationStatus{
 						Sync: v1alpha1.SyncStatus{
-							Status: v1alpha1.SyncStatusCodeOutOfSync,
+							Status:   v1alpha1.SyncStatusCodeOutOfSync,
+							Revision: "Next",
+						},
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "app2-multisource",
+					},
+					Status: v1alpha1.ApplicationStatus{
+						Sync: v1alpha1.SyncStatus{
+							Status:    v1alpha1.SyncStatusCodeOutOfSync,
+							Revisions: []string{"Next", "OtherNext"},
 						},
 					},
 				},
 			},
 			expectedAppStatus: []v1alpha1.ApplicationSetApplicationStatus{
 				{
-					Application: "app1",
-					Message:     "Application has pending changes, setting status to Waiting.",
-					Status:      "Waiting",
-					Step:        "1",
-					Id:          id,
+					Application:     "app1",
+					Message:         "Application has pending changes, setting status to Waiting.",
+					Status:          "Waiting",
+					Step:            "1",
+					TargetRevisions: []string{"Next"},
+				},
+				{
+					Application:     "app2-multisource",
+					Message:         "Application has pending changes, setting status to Waiting.",
+					Status:          "Waiting",
+					Step:            "1",
+					TargetRevisions: []string{"Next", "OtherNext"},
 				},
 			},
 		},
@@ -4950,9 +4976,13 @@ func TestUpdateApplicationSetApplicationStatus(t *testing.T) {
 						},
 						OperationState: &v1alpha1.OperationState{
 							Phase: common.OperationSucceeded,
+							SyncResult: &v1alpha1.SyncOperationResult{
+								Revision: "Previous",
+							},
 						},
 						Sync: v1alpha1.SyncStatus{
-							Status: v1alpha1.SyncStatusCodeOutOfSync,
+							Status:   v1alpha1.SyncStatusCodeOutOfSync,
+							Revision: "Next",
 						},
 					},
 				},
@@ -4963,11 +4993,11 @@ func TestUpdateApplicationSetApplicationStatus(t *testing.T) {
 			},
 			expectedAppStatus: []v1alpha1.ApplicationSetApplicationStatus{
 				{
-					Application: "app1",
-					Message:     "No Application status found, defaulting status to Waiting.",
-					Status:      "Waiting",
-					Step:        "2",
-					Id:          id,
+					Application:     "app1",
+					Message:         "No Application status found, defaulting status to Waiting.",
+					Status:          "Waiting",
+					Step:            "2",
+					TargetRevisions: []string{"Next"},
 				},
 			},
 		},
@@ -4991,10 +5021,10 @@ func TestUpdateApplicationSetApplicationStatus(t *testing.T) {
 							LastTransitionTime: &metav1.Time{
 								Time: time.Now().Add(time.Duration(-1) * time.Minute),
 							},
-							Message: "",
-							Status:  "Pending",
-							Step:    "1",
-							Id:      id,
+							Message:         "",
+							Status:          "Pending",
+							Step:            "1",
+							TargetRevisions: []string{"Next"},
 						},
 					},
 				},
@@ -5018,86 +5048,25 @@ func TestUpdateApplicationSetApplicationStatus(t *testing.T) {
 									Username:  "applicationset-controller",
 									Automated: true,
 								},
-								Info: []*v1alpha1.Info{
-									{
-										Name:  "Id",
-										Value: id,
-									},
-								},
+							},
+							SyncResult: &v1alpha1.SyncOperationResult{
+								Revision: "Next",
 							},
 						},
 						Sync: v1alpha1.SyncStatus{
-							Status: v1alpha1.SyncStatusCodeSynced,
+							Status:   v1alpha1.SyncStatusCodeSynced,
+							Revision: "Next",
 						},
 					},
 				},
 			},
 			expectedAppStatus: []v1alpha1.ApplicationSetApplicationStatus{
 				{
-					Application: "app1",
-					Message:     "Application resource completed a sync successfully, updating status from Pending to Progressing.",
-					Status:      "Progressing",
-					Step:        "1",
-					Id:          id,
-				},
-			},
-		},
-		{
-			name: "progresses a pending application with a successful sync not triggered by controller after pending transition to progressing",
-			appSet: v1alpha1.ApplicationSet{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "name",
-					Namespace: "argocd",
-				},
-				Spec: v1alpha1.ApplicationSetSpec{
-					Strategy: &v1alpha1.ApplicationSetStrategy{
-						Type:        "RollingSync",
-						RollingSync: &v1alpha1.ApplicationSetRolloutStrategy{},
-					},
-				},
-				Status: v1alpha1.ApplicationSetStatus{
-					ApplicationStatus: []v1alpha1.ApplicationSetApplicationStatus{
-						{
-							Application: "app1",
-							LastTransitionTime: &metav1.Time{
-								Time: time.Now().Add(time.Duration(-1) * time.Minute),
-							},
-							Message: "",
-							Status:  "Pending",
-							Step:    "1",
-							Id:      id,
-						},
-					},
-				},
-			},
-			apps: []v1alpha1.Application{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "app1",
-					},
-					Status: v1alpha1.ApplicationStatus{
-						Health: v1alpha1.HealthStatus{
-							Status: health.HealthStatusDegraded,
-						},
-						OperationState: &v1alpha1.OperationState{
-							Phase: common.OperationSucceeded,
-							StartedAt: metav1.Time{
-								Time: time.Now(),
-							},
-						},
-						Sync: v1alpha1.SyncStatus{
-							Status: v1alpha1.SyncStatusCodeSynced,
-						},
-					},
-				},
-			},
-			expectedAppStatus: []v1alpha1.ApplicationSetApplicationStatus{
-				{
-					Application: "app1",
-					Message:     "Application resource completed a sync successfully, updating status from Pending to Progressing.",
-					Status:      "Progressing",
-					Step:        "1",
-					Id:          id,
+					Application:     "app1",
+					Message:         "Application resource completed a sync successfully, updating status from Pending to Progressing.",
+					Status:          "Progressing",
+					Step:            "1",
+					TargetRevisions: []string{"Next"},
 				},
 			},
 		},
@@ -5121,10 +5090,10 @@ func TestUpdateApplicationSetApplicationStatus(t *testing.T) {
 							LastTransitionTime: &metav1.Time{
 								Time: time.Now(),
 							},
-							Message: "",
-							Status:  "Pending",
-							Step:    "1",
-							Id:      id,
+							Message:         "",
+							Status:          "Pending",
+							Step:            "1",
+							TargetRevisions: []string{"Next"},
 						},
 					},
 				},
@@ -5148,32 +5117,30 @@ func TestUpdateApplicationSetApplicationStatus(t *testing.T) {
 									Username:  "applicationset-controller",
 									Automated: true,
 								},
-								Info: []*v1alpha1.Info{
-									{
-										Name:  "Id",
-										Value: id,
-									},
-								},
+							},
+							SyncResult: &v1alpha1.SyncOperationResult{
+								Revision: "Next",
 							},
 						},
 						Sync: v1alpha1.SyncStatus{
-							Status: v1alpha1.SyncStatusCodeSynced,
+							Status:   v1alpha1.SyncStatusCodeSynced,
+							Revision: "Next",
 						},
 					},
 				},
 			},
 			expectedAppStatus: []v1alpha1.ApplicationSetApplicationStatus{
 				{
-					Application: "app1",
-					Message:     "Application resource completed a sync successfully, updating status from Pending to Progressing.",
-					Status:      "Progressing",
-					Step:        "1",
-					Id:          id,
+					Application:     "app1",
+					Message:         "Application resource completed a sync successfully, updating status from Pending to Progressing.",
+					Status:          "Progressing",
+					Step:            "1",
+					TargetRevisions: []string{"Next"},
 				},
 			},
 		},
 		{
-			name: "does not progresses a pending application with a successful sync triggered by controller with invalid id to progressing",
+			name: "does not progresses a pending application with a successful sync triggered by controller with invalid revision to progressing",
 			appSet: v1alpha1.ApplicationSet{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "name",
@@ -5192,10 +5159,10 @@ func TestUpdateApplicationSetApplicationStatus(t *testing.T) {
 							LastTransitionTime: &metav1.Time{
 								Time: time.Now().Add(time.Duration(-1) * time.Minute),
 							},
-							Message: "",
-							Status:  "Pending",
-							Step:    "1",
-							Id:      id,
+							Message:         "",
+							Status:          "Pending",
+							Step:            "1",
+							TargetRevisions: []string{"Next"},
 						},
 					},
 				},
@@ -5219,12 +5186,9 @@ func TestUpdateApplicationSetApplicationStatus(t *testing.T) {
 									Username:  "applicationset-controller",
 									Automated: true,
 								},
-								Info: []*v1alpha1.Info{
-									{
-										Name:  "Id",
-										Value: uuid.NewString(),
-									},
-								},
+							},
+							SyncResult: &v1alpha1.SyncOperationResult{
+								Revision: "Previous",
 							},
 						},
 						Sync: v1alpha1.SyncStatus{
@@ -5235,68 +5199,11 @@ func TestUpdateApplicationSetApplicationStatus(t *testing.T) {
 			},
 			expectedAppStatus: []v1alpha1.ApplicationSetApplicationStatus{
 				{
-					Application: "app1",
-					Message:     "",
-					Status:      "Pending",
-					Step:        "1",
-					Id:          id,
-				},
-			},
-		},
-		{
-			name: "does not progresses a pending application with an old successful sync not triggered by applicationset-controller to progressing",
-			appSet: v1alpha1.ApplicationSet{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "name",
-					Namespace: "argocd",
-				},
-				Spec: v1alpha1.ApplicationSetSpec{
-					Strategy: &v1alpha1.ApplicationSetStrategy{
-						Type:        "RollingSync",
-						RollingSync: &v1alpha1.ApplicationSetRolloutStrategy{},
-					},
-				},
-				Status: v1alpha1.ApplicationSetStatus{
-					ApplicationStatus: []v1alpha1.ApplicationSetApplicationStatus{
-						{
-							Application: "app1",
-							LastTransitionTime: &metav1.Time{
-								Time: time.Now(),
-							},
-							Message: "Application moved to Pending status, watching for the Application resource to start Progressing.",
-							Status:  "Pending",
-							Step:    "1",
-						},
-					},
-				},
-			},
-			apps: []v1alpha1.Application{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "app1",
-					},
-					Status: v1alpha1.ApplicationStatus{
-						Health: v1alpha1.HealthStatus{
-							Status: health.HealthStatusDegraded,
-						},
-						OperationState: &v1alpha1.OperationState{
-							Phase: common.OperationSucceeded,
-							StartedAt: metav1.Time{
-								Time: time.Now().Add(time.Duration(-1) * time.Second),
-							},
-						},
-						Sync: v1alpha1.SyncStatus{
-							Status: v1alpha1.SyncStatusCodeSynced,
-						},
-					},
-				},
-			},
-			expectedAppStatus: []v1alpha1.ApplicationSetApplicationStatus{
-				{
-					Application: "app1",
-					Message:     "Application moved to Pending status, watching for the Application resource to start Progressing.",
-					Status:      "Pending",
-					Step:        "1",
+					Application:     "app1",
+					Message:         "",
+					Status:          "Pending",
+					Step:            "1",
+					TargetRevisions: []string{"Next"},
 				},
 			},
 		},
@@ -5378,7 +5285,7 @@ func TestUpdateApplicationSetApplicationStatus(t *testing.T) {
 				KubeClientset:    kubeclientset,
 			}
 
-			appStatuses, err := r.updateApplicationSetApplicationStatus(context.TODO(), log.NewEntry(log.StandardLogger()), &cc.appSet, cc.apps, cc.appStepMap, func() string { return id })
+			appStatuses, err := r.updateApplicationSetApplicationStatus(context.TODO(), log.NewEntry(log.StandardLogger()), &cc.appSet, cc.apps, cc.appStepMap)
 
 			// opt out of testing the LastTransitionTime is accurate
 			for i := range appStatuses {
